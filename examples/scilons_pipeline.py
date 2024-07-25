@@ -15,6 +15,7 @@ from datatrove.pipeline.readers import JsonlReader, WarcReader
 from datatrove.pipeline.tokens import TokensCounter
 from datatrove.pipeline.writers.jsonl import JsonlWriter
 
+import argparse
 from datasets import load_dataset
 import nltk
 from nltk.corpus import stopwords
@@ -224,5 +225,9 @@ def main(hf_token:str):
 
 
 if __name__ == '__main__':
-    # Add smth that receive the token as arg
-    main(token)
+    
+    parser = argparse.ArgumentParser(description="Authenticate with Hugging Face and list dataset configs.")
+    parser.add_argument("token", type=str, help="Hugging Face API token")
+    args = parser.parse_args()
+
+    main(args.token)

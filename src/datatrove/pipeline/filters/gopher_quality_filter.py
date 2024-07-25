@@ -8,9 +8,6 @@ from datatrove.utils.typeshelper import Languages
 from datatrove.utils.word_tokenizers import load_word_tokenizer
 
 
-STOP_WORDS = ["the", "be", "to", "of", "and", "that", "have", "with"]
-
-
 class GopherQualityFilter(BaseFilter):
     name = "🥇 Gopher Quality"
 
@@ -27,7 +24,7 @@ class GopherQualityFilter(BaseFilter):
         min_stop_words: int | None = 2,
         stop_words: list[str] | None = None,
         exclusion_writer: DiskWriter = None,
-        language: str = Languages.english,
+        language: str,
     ):
         """
         Filter to apply Gopher's quality heuristic rules.
@@ -56,7 +53,8 @@ class GopherQualityFilter(BaseFilter):
         self.max_ellipsis_lines_ratio = max_ellipsis_lines_ratio
         self.max_non_alpha_words_ratio = max_non_alpha_words_ratio
         self.min_stop_words = min_stop_words
-        self.stop_words = set(STOP_WORDS if stop_words is None else stop_words)
+        self.stop_words = stop_words
+        self.language = language
         self.tokenizer = load_word_tokenizer(language)
 
     def filter(self, doc: Document) -> bool | tuple[bool, str]:

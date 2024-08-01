@@ -1,3 +1,17 @@
+import sys
+import os
+
+# Print current working directory
+print("Current working directory:", os.getcwd())
+
+# Append the src directory to sys.path
+src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src'))
+print("src_path:", src_path)
+sys.path[0] = src_path
+#sys.path.append(src_path)
+# Verify sys.path
+print("sys.path:", sys.path)
+
 from datatrove.executor.slurm import SlurmPipelineExecutor
 from datatrove.pipeline.dedup import MinhashDedupCluster, MinhashDedupFilter, MinhashDedupSignature
 from datatrove.pipeline.dedup.minhash import MinhashConfig, MinhashDedupBuckets
@@ -11,7 +25,7 @@ from datatrove.pipeline.filters import (
     URLFilter,
 )
 from datatrove.pipeline.formatters import PIIFormatter
-from datatrove.pipeline.readers import JsonlReader, WarcReader
+from datatrove.pipeline.readers import JsonlReader, HuggingFaceDatasetReader
 from datatrove.pipeline.tokens import TokensCounter
 from datatrove.pipeline.writers.jsonl import JsonlWriter
 
@@ -42,7 +56,7 @@ def get_dataset_langs(dataset_name: str, hf_token: str) -> list:
         else:
             raise e
 
-def get_stopwords(lang_list: list) -> dict:
+def get_filtered_stopwords(lang_list: list) -> dict:
     """
     Takes list of available langs (i.e. configs) and returns a dict with lang codes as keys and lists of stopwords as values. 
     If no stopword list is found the list will be empty.
@@ -55,22 +69,22 @@ def get_stopwords(lang_list: list) -> dict:
     for lang in available_langs:
         try:
             stopwords_list[lang] = get_stopwords(lang)
-            except:
-                if lang == 'zh-tw' or lang == 'zh-cn':
-                    stopwords_list[lang] = get_stopwords('zh')
-                elif lang == 'en-us':
-                    stopwords_list[lang] = get_stopwords('en')
-                # If available get from NTLK
-                elif lang == 'bn':
-                    stopwords_list[lang] = set(stopwords.words('bengali'))
-                elif lang == 'et':
-                    stopwords_list[lang] = set(stopwords.words('greek'))
-                elif lang == 'he':
-                    stopwords_list[lang] = set(stopwords.words('hebrew'))
-                elif lang == 'ne':
-                    stopwords_list[lang] = set(stopwords.words('nepali'))
-                else:
-                    pass
+        except:
+            if lang == 'zh-tw' or lang == 'zh-cn':
+                stopwords_list[lang] = get_stopwords('zh')
+            elif lang == 'en-us':
+                stopwords_list[lang] = get_stopwords('en')
+            # If available get from NTLK
+            elif lang == 'bn':
+                stopwords_list[lang] = list(set(stopwords.words('bengali')))
+            elif lang == 'et':
+                stopwords_list[lang] = list(set(stopwords.words('greek')))
+            elif lang == 'he':
+                stopwords_list[lang] = list(set(stopwords.words('hebrew')))
+            elif lang == 'ne':
+                stopwords_list[lang] = list(set(stopwords.words('nepali')))
+            else:
+                pass
 
     return stopwords_list
 
@@ -79,18 +93,23 @@ def main(hf_token:str):
 
     # Get all configs/langs in the tmp4b datasets
     available_langs = get_dataset_langs("malteos/tmp4b", hf_token)
-    stopwords_list = get_stopwords(available_langs)
+    stopwords_list = get_filtered_stopwords(available_langs)
     # Need to think about what happens when lang = unknown in terms of LanguageFilter and GopherQualityFilter.
 
     # iterate over all configs in tmp4b and apply filters
     for lang in available_langs:
-        
-        MAIN_OUTPUT_PATH = "" #?
-        FILTERING_OUTPUT_PATH = f"{MAIN_OUTPUT_PATH}/base_processing"
-        
-        main_processing_executor = SlurmPipelineExecutor(
+
+        if lang == 'en':
+            MAIN_OUTPUT_PATH = "/netscratch/abu/"
+            FILTERING_OUTPUT_PATH = f"{MAIN_OUTPUT_PATH}/base_processing"
+
+            main_processing_executor = SlurmPipelineExecutor(
             job_name=f"cc_{lang}",
             pipeline=[
+                HuggingFaceDatasetReader(
+                    dataset="malteos/tmp4b",
+                    dataset_options={"token": hf_token, "name": lang}
+                ),
                 LanguageFilter(
                     languages=lang, # need to make sure lang codes in tmp4b and in fasttext are same
                     exclusion_writer=JsonlWriter(f"{FILTERING_OUTPUT_PATH}/2_non_english/",
@@ -101,8 +120,7 @@ def main(hf_token:str):
                     exclusion_writer=JsonlWriter(f"{FILTERING_OUTPUT_PATH}/removed/3_gopher_rep/{lang}")
                     ),
                 GopherQualityFilter(
-                    language=lang, 
-                    stop_words=stopwords_list[lang],
+                    language=lang,
                     exclusion_writer=JsonlWriter(f"{FILTERING_OUTPUT_PATH}/removed/4_gopher_qual/{lang}")
                     ),
                 C4QualityFilter(
@@ -117,7 +135,7 @@ def main(hf_token:str):
             tasks=8000,
             time="10:00:00",
             logging_dir=f"{MAIN_OUTPUT_PATH}/logs/base_processing/{lang}",
-            slurm_logs_folder=f"logs/base_processing/{lang}/slurm_logs",  # must be local
+            slurm_logs_folder=f"{MAIN_OUTPUT_PATH}/logs/base_processing/{lang}/slurm_logs",  # must be local
             randomize_start_duration=180,  # don't hit the bucket all at once with the list requests
             mem_per_cpu_gb=2,
             partition="batch",
@@ -218,15 +236,9 @@ def main(hf_token:str):
 
 
 # Classify 'unknown'?
-
-
-
-
-
-
 if __name__ == '__main__':
     
-    parser = argparse.ArgumentParser(description="Authenticate with Hugging Face and list dataset configs.")
+    parser = argparse.ArgumentParser()
     parser.add_argument("token", type=str, help="Hugging Face API token")
     args = parser.parse_args()
 
